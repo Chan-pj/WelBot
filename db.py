@@ -1,4 +1,5 @@
 import pymysql
+from werkzeug.security import generate_password_hash, check_password_hash
 from config import DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT
 
 def get_connection():
@@ -46,18 +47,22 @@ def register_user(username, password, region):
     with get_connection() as conn:
         with conn.cursor() as cursor:
             try:
-                cursor.execute(sql, (username, password, region))
+                # 비밀번호는 평문 대신 해시로 저장
+                cursor.execute(sql, (username, generate_password_hash(password), region))
                 conn.commit()
                 return True
             except pymysql.err.IntegrityError:
                 return False
 
 def login_user(username, password):
-    sql = "SELECT id, username, role, region FROM users WHERE username=%s AND password=%s"
+    sql = "SELECT id, username, password, role, region FROM users WHERE username=%s"
     with get_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(sql, (username, password))
-            return cursor.fetchone()
+            cursor.execute(sql, (username,))
+            user = cursor.fetchone()
+    if not user or not check_password_hash(user.pop("password"), password):
+        return None
+    return user
 
 def get_all_users():
     sql = "SELECT id, username, role, region, created_at FROM users ORDER BY created_at DESC"
