@@ -26,6 +26,7 @@
 | **비용(토큰) 최적화** | 검색 결과 수·프롬프트 축약으로 질문당 토큰 **약 4,150 → 3,300 (약 20% 절감)** |
 | **할루시네이션 감소** | 지역·기관·신청방법 메타데이터를 컨텍스트에 명시해 LLM이 정보를 추측하지 않도록 개선 |
 | **운영 고려** | 주간 인덱스 재구축 배치, API Rate Limit 재시도, 환경변수 기반 비밀 정보 분리, `docker compose` 한 번으로 실행 환경 구성 |
+| **데이터 현황 분석** | 수집한 5,011건의 결측치 · 출처 · 지역 · 정책 특성을 집계하고 그래프로 정리 → [분석 결과](docs/analysis/summary.md) |
 
 ## 아키텍처
 
@@ -70,6 +71,32 @@ flowchart LR
 **5. 지역 입력 개선** — "강남" 입력 시 "강남구"와 매칭 실패
 - 해결: DB 기반 시군구 목록 API(`/regions`) + 선택형 드롭다운, 기존 자유 입력값도 호환
 
+**6. 비밀번호 해시 저장** — 회원 비밀번호가 평문으로 저장됨
+- 해결: `werkzeug.security`로 가입 시 해시(scrypt)로 저장하고, 로그인 시 아이디로 조회한 뒤 해시를 비교하도록 변경
+- 참고: 이전에 평문으로 가입한 계정은 다시 가입해야 합니다 (`seed.sql`에는 회원 정보가 없음)
+
+## 데이터 현황 분석
+
+수집한 정책 데이터를 `seed.sql`에서 직접 읽어 품질과 분포를 점검했습니다. DB 없이 실행할 수 있습니다.
+
+```bash
+pip install -r analysis/requirements.txt
+python analysis/analyze_policies.py    # → docs/analysis/ 에 그래프와 summary.md 생성
+```
+
+**주요 발견**
+- 정책의 **91%가 지자체 정책**이지만 조회수 상위 10개는 **모두 중앙부처 정책** → 지자체 정책은 수는 많아도 잘 알려지지 않아, 거주 지역 기반 추천이 필요한 근거
+- 정책 ID 중복 0건, 상세 정보 미연결 0건으로 적재 정합성 확인
+- 상세 링크 · 온라인 신청 여부의 빈 값 4,561건은 **모두 지자체 정책** → 지자체 수집 스크립트가 해당 항목을 저장하지 않아 생긴 빈 값으로, 수집 단계의 개선 과제로 확인
+- 제공 유형 328건이 `현금지급, 기타` / `현금지급,기타`처럼 여러 값과 제각각인 띄어쓰기로 저장되어 있어, 값을 나눠 정리한 뒤 집계
+
+<p align="center">
+  <img src="docs/analysis/by_sido.png" width="48%" />
+  <img src="docs/analysis/missing.png" width="48%" />
+</p>
+
+전체 결과(생애주기 · 관심주제 · 제공 유형 · 지원 주기 · 조회수 상위 정책)는 [docs/analysis/summary.md](docs/analysis/summary.md)에 있습니다.
+
 ## 주요 기능
 
 - **RAG 기반 정책 검색** — `jhgan/ko-sroberta-multitask` 임베딩 + ChromaDB 벡터 검색
@@ -104,6 +131,7 @@ flowchart LR
 ├── check.py          # Groq 사용 가능 모델 확인용 스크립트
 ├── schema.sql        # DB 테이블 스키마
 ├── seed.sql          # 복지 정책 데이터 5,011건 (2026년 6월 수집, 회원 정보 미포함)
+├── analysis/         # 데이터 현황 분석 스크립트 (seed.sql → docs/analysis/)
 ├── Dockerfile · docker-compose.yml
 ├── index.html · script.js · style.css · media.css
 └── .env.example      # 환경변수 템플릿
@@ -157,6 +185,6 @@ python app.py
 
 ## 향후 개선 계획
 
-- 비밀번호 해시 저장 (`werkzeug.security`) 적용
+- 지자체 정책의 상세 링크 · 온라인 신청 여부 수집 (데이터 현황 분석에서 확인한 빈 값 4,561건)
 - 공공데이터 수집 단계를 주간 배치에 통합해 데이터 자동 최신화
 - 검색 품질 정량 평가 (질문-정답 세트 기반 Recall@k 측정)
